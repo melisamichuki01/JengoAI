@@ -42,7 +42,10 @@ def save_report_to_notion(report_text: str, extracted: dict, image_url: str = No
             "rich_text": [{"text": {"content": extracted.get("safety_incidents", "No incidents reported")}}]
         },
         "Report": {
-            "rich_text": [{"text": {"content": report_text}}]
+            "rich_text": [
+                    {"text": {"content": chunk}}
+                    for chunk in [report_text[i:i+1999] for i in range(0, len(report_text), 1999)]
+                ]
         },
         "Status": {
             "select": {"name": blocker_status}
