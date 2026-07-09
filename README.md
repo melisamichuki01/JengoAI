@@ -2,32 +2,162 @@
 
 Agentic site reporting and inventory management for construction teams. Foremen submit daily updates via CLI or a Streamlit form. The agent extracts structured data, updates inventory, raises reorder alerts, generates a professional client report, and saves everything to Notion for PM review.
 
-Built with Groq + Llama 3.1, Notion, and Streamlit. No WhatsApp required.
+Built with Groq + Llama 3.3, Notion, and Streamlit.
 
 ---
 
-## What it does
+## Two versions: Pipeline vs Agent
 
-1. Foreman types or pastes a site update (English, Swahili, or mixed)
-2. Agent extracts: site name, progress, blockers, materials used, labor, safety
-3. You confirm the extraction before anything is saved
-4. Inventory is updated automatically
-5. A professional client report is generated
-6. Report is saved to Notion as a Draft
-7. PM reviews and approves in the Streamlit dashboard
+JengoAI ships with two versions of the core logic side by side. This is intentional. The two versions exist to show the difference between an LLM-powered automation pipeline and a true AI agent.
+
+### Version 1: Pipeline (`cli_pipeline.py` + `agent_pipeline.py`)
+
+```
+You decide the order. Python calls each function in a fixed sequence.
+
+input → extract → inventory → generate → save
+```
+
+The LLM is used twice: once to extract structured data, once to generate the report. But Python controls what happens, when, and in what order. The LLM is a smart function call inside a script, not the one making decisions.
+
+```python
+# agent_pipeline.py - you hardcode the sequence
+extracted = extract_update(raw_text)
+update_inventory(extracted)
+report = generate_report(extracted)
+save_report_to_notion(report, extracted)
+```
+
+### Version 2: Agentic (`cli_agent.py` + `agent_agentic.py`)
+
+```
+The LLM decides the order. It receives tools and a task and figures out the rest.
+
+input → LLM decides → calls tools → reads results → decides again → stops when done
+```
+
+The LLM receives a list of 5 tools and a single instruction: "process this site update." It decides which tools to call, in what order, with what arguments, based on what each tool returns. Python only runs what the LLM asks it to run.
+
+```python
+# agent_agentic.py - LLM drives the loop
+response = groq.chat.completions.create(
+    model=MODEL,
+    messages=messages,
+    tools=TOOL_SCHEMAS,   # LLM sees available tools
+    tool_choice="auto",   # LLM decides which to call
+)
+# If LLM wants a tool: execute it, add result to history, loop again
+# If LLM says stop: task is complete
+```
+
+---
+
+## What makes the agentic version a real agent
+
+A true AI agent has 5 components. Here is how each one is implemented in Version 2:
+
+| Component | What it means | Implementation |
+|---|---|---|
+| Brain | LLM that reasons and decides | Groq + Llama 3.3 70B |
+| Tools | Functions the LLM can call | 5 tools with JSON schemas |
+| Loop | Runs until the LLM decides the task is done | Groq function calling loop |
+| In-context memory | Remembers what it did in this session | Full message history passed each iteration |
+| Persistent memory | Remembers what happened in past sessions | `fetch_site_history` reads past Notion reports |
+
+### The 5 tools
+
+```
+1. extract_site_update        Parse raw Swahili/English message into structured data
+2. fetch_site_history         Read last 3 reports for this site from Notion
+3. update_inventory_for_material  Update stock levels and raise reorder alerts
+4. generate_site_report       Write a client report with historical trend context
+5. save_report_to_notion      Save the report to Notion as a Draft
+```
+
+### The loop in plain terms
+
+```
+LLM receives: foreman message + list of 5 tools
+        |
+        v
+LLM decides: "I should call extract_site_update first"
+        |
+        v
+Python runs extract_site_update, returns structured dict
+        |
+        v
+[Human checkpoint] - confirm extraction before continuing
+        |
+        v
+LLM receives the result, decides: "Now I should call fetch_site_history"
+        |
+        v
+Python runs fetch_site_history, returns last 3 reports and progress trend
+        |
+        v
+LLM decides: "Now update_inventory_for_material for cement, then for tiles"
+        |
+        v
+Python runs inventory updates, reorder alerts raised if needed
+        |
+        v
+LLM decides: "Now generate_site_report with history included"
+        |
+        v
+Python generates report with trend: "Progress improved from 70% to 85%"
+        |
+        v
+LLM decides: "Now save_report_to_notion"
+        |
+        v
+Python saves to Notion, returns URL
+        |
+        v
+LLM decides: "Task complete" - loop ends
+```
+
+### Persistent memory in action
+
+The key upgrade over Version 1 is that Version 2 remembers the past. Before generating the report, it fetches the last 3 reports for the same site and uses them to show trends:
+
+**Version 1 report (no memory):**
+> "The Kilimani site is currently at 85% completion."
+
+**Version 2 report (with persistent memory):**
+> "Progress has increased from 70% last week to 85% this week, an improvement of 15%. The crane blocker reported in the previous update has been resolved. The team continues to perform well."
+
+Same data. Dramatically more useful report.
+
+---
+
+## How to compare the two versions
+
+Run them back to back with the same foreman message and compare the output:
+
+```bash
+# Step 1: run the pipeline version
+python cli_pipeline.py
+
+# Step 2: run the agentic version with the same message
+python cli_agent.py
+```
+
+Watch the terminal output. The pipeline version runs straight through with no visible decision-making. The agentic version prints each tool the LLM decides to call, in the order it decides to call them, with the arguments it chooses.
+
+You will also notice the agentic version pauses at the human checkpoint after extraction, asks you to confirm, and re-extracts with your correction if something is wrong. The pipeline version has no such loop.
 
 ---
 
 ## Prerequisites
 
-You need two accounts before you start. Both are free.
+Two free accounts required:
 
-- **Groq** — the AI that powers the agent: https://console.groq.com
-- **Notion** — where reports and inventory are stored: https://www.notion.so
+- **Groq** - https://console.groq.com
+- **Notion** - https://www.notion.so
 
 ---
 
-## Setup (follow these steps in order)
+## Setup
 
 ### Step 1: Clone the repo
 
@@ -47,89 +177,49 @@ pip install groq notion-client streamlit python-dotenv requests
 1. Go to https://console.groq.com
 2. Sign up for a free account
 3. Click **API Keys** in the left sidebar
-4. Click **Create API Key**
-5. Copy the key — you will need it in Step 6
+4. Click **Create API Key** and copy it
 
 ### Step 4: Create a Notion integration
 
 1. Go to https://www.notion.so/my-integrations
 2. Click **New Integration**
-3. Name it `jengoai`
-4. Select your workspace
-5. Click **Submit**
-6. Copy the **Internal Integration Token** (starts with `secret_`)
+3. Name it `jengoai`, select your workspace, click **Submit**
+4. Copy the **Internal Integration Token** (starts with `secret_`)
 
 ### Step 5: Create a Notion page and connect your integration
 
-Notion does not allow the agent to create pages automatically, so you need to create one page manually. This takes about 30 seconds.
-
 1. Open Notion in your browser
-2. Click **New Page** in the left sidebar
-3. Name it anything, for example `JengoAI`
-4. Click the `...` menu in the top right corner
-5. Click **Connections**
-6. Search for `jengoai` and click it to add it
-7. Copy the full URL from your browser address bar
+2. Click **New Page** in the left sidebar, name it `JengoAI`
+3. Click `...` top right → **Connections** → search for `jengoai` → add it
+4. Copy the full URL from your browser
 
-The URL will look something like this:
-```
-https://www.notion.so/JengoAI-abc123def456789012345678901234ab
-```
-
-### Step 6: Run the setup script
+### Step 6: Run setup
 
 ```bash
 python setup.py
 ```
 
-The script will ask for three things:
-
-- Your Notion API key (from Step 4)
-- Your Groq API key (from Step 3)
-- Your Notion page URL (from Step 5)
-
-It will then create all three databases in your Notion page and write a `.env` file with all the keys and IDs automatically. You do not need to copy any database IDs.
-
-When setup is complete you should see this in your terminal:
-
-```
-  ╔══════════════════════════════════════════╗
-  ║           Setup complete!                ║
-  ╚══════════════════════════════════════════╝
-```
-
-And in Notion you should see three new databases inside your page:
-- Kamau Construction - Site Reports
-- Kamau Construction - Inventory
-- Kamau Construction - Reorder Alerts
+Paste your Notion key, Groq key, and page URL when asked. The script creates all three databases and writes your `.env` automatically.
 
 ---
 
 ## Running the agent
 
-### CLI mode (recommended for testing)
+### Pipeline version
 
 ```bash
-python cli.py
+python cli_pipeline.py
 ```
 
-Paste or type the foreman's site update when prompted. Press Enter twice to submit.
+Fixed sequence. Fast. No visible decision-making. Good for showing the baseline.
 
-**Example message:**
-```
-Westlands site. James here. We are at 60% completion.
-Cement delivery has not arrived, we need 50 bags urgently.
-Used 20 bags of cement and 10 litres of paint today.
-Need 8 labourers on Thursday. No accidents today.
+### Agentic version
+
+```bash
+python cli_agent.py
 ```
 
-The agent will:
-1. Extract the data and show it to you
-2. Ask you to confirm before saving
-3. Update inventory for any materials reported
-4. Generate a professional report
-5. Save it to Notion
-6. Print the Notion URL
+LLM-driven loop. Shows each tool call as it happens. Includes human-in-the-loop confirmation and persistent memory. Good for showing what makes an agent different.
 
 ### Streamlit dashboard
 
@@ -137,15 +227,13 @@ The agent will:
 streamlit run app.py
 ```
 
-Open the URL shown in your terminal (usually `http://localhost:8501`).
-
-The dashboard has five pages:
+Five pages:
 
 | Page | What it does |
 |---|---|
 | Overview | Summary metrics and recent reports |
 | Foreman Input | Submit updates via free text or structured form |
-| Pending Review | Approve or flag reports as PM |
+| Pending Review | PM approves or flags reports |
 | All Reports | Full history with filters |
 | Inventory | Stock levels and reorder alerts |
 
@@ -155,13 +243,16 @@ The dashboard has five pages:
 
 ```
 jengoai/
-├── agent.py                  # Groq: extract structured data and generate report
-├── notion_client_wrapper.py  # Notion: read and write site reports
+├── agent_pipeline.py         # Version 1: fixed pipeline, you control the sequence
+├── cli_pipeline.py           # Version 1: CLI runner for the pipeline
+├── agent_agentic.py          # Version 2: agentic loop, LLM controls the sequence
+├── cli_agent.py              # Version 2: CLI runner for the agentic version
+├── tools.py                  # All 5 tool functions and their JSON schemas
+├── notion_client_wrapper.py  # Notion: site reports read/write
 ├── inventory.py              # Notion: inventory and reorder alerts
-├── cli.py                    # CLI foreman input mode
 ├── app.py                    # Streamlit dashboard
 ├── setup.py                  # First-time setup script
-├── .env.example              # Template for your .env file
+├── .env.example
 ├── .gitignore
 └── README.md
 ```
@@ -170,82 +261,91 @@ jengoai/
 
 ## Notion databases
 
-Three databases are created automatically by `setup.py`:
+Three databases created automatically by `setup.py`:
 
 | Database | Purpose |
 |---|---|
-| Site Reports | One row per daily foreman update with generated report |
-| Inventory | Tracks material stock levels per site |
+| Site Reports | One row per daily update with generated report |
+| Inventory | Material stock levels per site |
 | Reorder Alerts | Auto-raised when stock is low relative to project progress |
 
 ---
 
 ## Reorder logic
 
-The agent raises a reorder alert when stock is low relative to how far along the project is:
-
 | Condition | Priority |
 |---|---|
-| Project >= 75% done and stock < 40% remaining | High |
-| Project >= 50% done and stock < 30% remaining | High |
-| Project >= 40% done and stock < 25% remaining | Medium |
-| Project >= 25% done and stock < 20% remaining | Low |
+| Progress >= 75% and stock < 40% | High |
+| Progress >= 50% and stock < 30% | High |
+| Progress >= 40% and stock < 25% | Medium |
+| Progress >= 25% and stock < 20% | Low |
 
 ---
 
-## Environment variables
+## Sample foreman messages
 
-Your `.env` file is created automatically by `setup.py`. It contains:
-
+**English:**
 ```
-GROQ_API_KEY=your_groq_key
-NOTION_API_KEY=your_notion_key
-NOTION_SITE_REPORTS_DB=your_database_id
-NOTION_INVENTORY_DB=your_database_id
-NOTION_REORDER_DB=your_database_id
+Westlands site. James here. We are at 60% completion.
+Cement delivery has not arrived, we need 50 bags urgently.
+Used 20 bags of cement and 10 litres of paint today.
+Need 8 labourers on Thursday. No accidents today.
 ```
 
-Never commit your `.env` file to GitHub. It is already in `.gitignore`.
+**Swahili/English mix:**
+```
+Kilimani site. Peter hapa. Tumefika 85%.
+Crane imevunjika na steel rods hazijakuja.
+Tunahitaji electrician. Mfanyakazi mmoja alijeruhiwa kidogo.
+```
+
+**High progress, triggers reorder alert:**
+```
+Thika site. Mary hapa. Tumefika 90%.
+Tumitumia saruji mifuko 20 na tiles pieces 50 leo.
+Stock ya saruji inakwisha kabisa, tunahitaji mifuko 100 haraka sana.
+Salama, hakuna ajali leo.
+```
 
 ---
 
 ## Troubleshooting
 
-**`NOTION_SITE_REPORTS_DB not set. Run: python setup.py`**
-Your `.env` file is missing the database IDs. Run `python setup.py` again.
+**`NOTION_SITE_REPORTS_DB not set`**
+Run `python setup.py` to create databases and write `.env`.
 
 **`API token is invalid`**
-Your Notion key is not being loaded. Make sure `load_dotenv()` is at the top of the file throwing the error.
+Add `from dotenv import load_dotenv` and `load_dotenv()` at the top of the file throwing the error.
 
 **`Could not find database with ID`**
-The database exists but your integration does not have access to it. Open the database in Notion, click `...`, click Connections, and add your `jengoai` integration.
+Open the database in Notion → `...` → Connections → add your `jengoai` integration.
 
 **`model llama-3.1-70b-versatile has been decommissioned`**
-Open `agent.py` and change the MODEL line to:
+Open `agent_pipeline.py` or `agent_agentic.py` and change the MODEL line to:
 ```python
 MODEL = "llama-3.3-70b-versatile"
 ```
+
+**Streamlit shows a blank screen**
+Make sure `load_dotenv()` is at the top of `agent_agentic.py`, `notion_client_wrapper.py`, and `inventory.py`.
 
 ---
 
 ## Running on GitHub Codespaces
 
 1. Fork this repo to your GitHub account
-2. Open the repo on GitHub
-3. Click the green **Code** button → **Codespaces** → **Create codespace on main**
-4. In the terminal that opens:
+2. Open the repo → green **Code** button → **Codespaces** → **Create codespace on main**
+3. In the terminal:
 
 ```bash
 pip install groq notion-client streamlit python-dotenv requests
 python setup.py
-python cli.py
+python cli_agent.py
 streamlit run app.py
 ```
-
-Codespaces will prompt you to open the Streamlit port in your browser automatically.
 
 ---
 
 ## Built by
 
-MLlabswithMel - teaching agents by building them.
+[MLlabswithMel]teaching agents by building them.
