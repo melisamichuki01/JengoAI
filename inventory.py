@@ -82,17 +82,10 @@ def get_inventory(site: str = None) -> list:
 
 
 def get_inventory_item(material: str, site: str) -> dict | None:
-    """
-    Fetch a single inventory item by material name and site.
-    Returns None if not found.
-    """
     response = notion.databases.query(
         database_id=INVENTORY_DB,
         filter={
-            "and": [
-                {"property": "Material Name", "title": {"equals": material}},
-                {"property": "Site", "select": {"equals": site}},
-            ]
+            "property": "Material Name", "title": {"equals": material}
         },
     )
     results = response.get("results", [])
@@ -147,7 +140,9 @@ def update_inventory(material: str, site: str, qty_used: float, progress: float)
             parent={"database_id": INVENTORY_DB},
             properties={
                 "Material Name": {"title": [{"text": {"content": material}}]},
-                "Site":          {"select": {"name": site}},
+                "Site": {
+                        "rich_text": [{"text": {"content": site}}]
+                    },
                 "Opening Stock": {"number": 0},
                 "Total Used":    {"number": qty_used},
                 "Remaining":     {"number": 0},
