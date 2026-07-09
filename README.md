@@ -248,4 +248,4 @@ Codespaces will prompt you to open the Streamlit port in your browser automatica
 
 ## Built by
 
-[MLlabswithMel]teaching agents by building them.
+MLlabswithMel - teaching agents by building them.
