@@ -348,4 +348,4 @@ streamlit run app.py
 
 ## Built by
 
-[MLlabswithMel]teaching agents by building them.
+MLlabswithMel - teaching agents by building them.
