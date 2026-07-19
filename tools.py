@@ -355,10 +355,10 @@ TOOL_SCHEMAS = [
                 "type": "object",
                 "properties": {
                     "material_name":       {"type": "string",  "description": "Name of the material e.g. cement"},
-                    "quantity_used":       {"type": "number",  "description": "How much was used"},
+                    "quantity_used":       {"type": "number",  "description": "How much was used, as a JSON number (e.g. 20, not \"20\")"},
                     "unit":                {"type": "string",  "description": "Unit e.g. bags, litres, kg"},
                     "site_name":           {"type": "string",  "description": "Name of the construction site"},
-                    "progress_percentage": {"type": "number",  "description": "Current project completion percentage"},
+                    "progress_percentage": {"type": "number",  "description": "Current project completion percentage, as a JSON number (e.g. 60, not \"60\")"},
                 },
                 "required": ["material_name", "quantity_used", "unit", "site_name", "progress_percentage"],
             },

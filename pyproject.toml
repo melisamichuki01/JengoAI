@@ -1,0 +1,16 @@
+[project]
+name = "jengoai"
+version = "0.1.0"
+description = "Agentic site reporting and inventory management for construction teams"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.139.2",
+    "groq>=1.5.0",
+    "notion-client==2.2.1",
+    "python-dotenv>=1.2.2",
+    "python-multipart>=0.0.32",
+    "requests>=2.34.2",
+    "streamlit>=1.59.2",
+    "twilio>=9.10.9",
+    "uvicorn>=0.51.0",
+]
