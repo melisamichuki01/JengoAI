@@ -116,14 +116,46 @@ def _create_with_retry(client, messages: list):
     raise last_error
 
 
-def _format_confirmation_question(extracted: dict) -> str:
+def _check_duplicate_today(site_name: str) -> dict | None:
+    """
+    Checks whether a report for this site was already submitted today.
+    Returns the existing report dict (with its foreman name) if found,
+    otherwise None. Used to flag possible duplicates during confirmation,
+    not to block the submission, since a legitimate stand-in foreman
+    submitting a second report for the same site/day is a real case.
+    """
+    from datetime import datetime
+    from notion_client_wrapper import get_all_reports
+
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    site_clean = (site_name or "").strip().lower()
+
+    for report in get_all_reports():
+        if report.get("date", "").startswith(today_str) and \
+           report.get("site_name", "").strip().lower() == site_clean:
+            return report
+    return None
+
+
+def _format_confirmation_question(extracted: dict, duplicate: dict = None) -> str:
     blockers = ", ".join(extracted.get("blockers", [])) or "None"
     materials = extracted.get("materials_used", [])
     materials_str = ", ".join(
         f"{m.get('name')} ({m.get('quantity','?')} {m.get('unit','units')})" for m in materials
     ) or "None reported"
 
+    duplicate_note = ""
+    if duplicate:
+        existing_foreman = duplicate.get("foreman", "someone")
+        duplicate_note = (
+            f"⚠️ Note: A report for {extracted.get('site_name', 'this site')} was "
+            f"already submitted today by {existing_foreman}. If the usual foreman "
+            f"wasn't available and you're standing in, that's fine, just confirm "
+            f"below and this will be logged as an additional update for today.\n\n"
+        )
+
     return (
+        f"{duplicate_note}"
         f"Please confirm this is correct:\n\n"
         f"Site: {extracted.get('site_name', 'Unknown')}\n"
         f"Foreman: {extracted.get('foreman_name', 'Unknown')}\n"
@@ -179,6 +211,8 @@ def start_session(phone: str, raw_message: str) -> str:
         "content": json.dumps(result),
     })
 
+    duplicate = _check_duplicate_today(result.get("site_name", ""))
+
     SESSIONS[phone] = {
         "messages": messages,
         "state": "awaiting_confirmation",
@@ -186,7 +220,7 @@ def start_session(phone: str, raw_message: str) -> str:
         "retries": 0,
     }
 
-    return _format_confirmation_question(result)
+    return _format_confirmation_question(result, duplicate=duplicate)
 
 
 def _continue_after_confirmation(phone: str) -> str:
@@ -251,7 +285,9 @@ def _retry_extraction(phone: str, correction: str) -> str:
     }
     session["raw_message"] = corrected_raw
 
-    return _format_confirmation_question(result)
+    duplicate = _check_duplicate_today(result.get("site_name", ""))
+
+    return _format_confirmation_question(result, duplicate=duplicate)
 
 
 def _classify_confirmation(text: str) -> str:
